@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/pion/ice/v3"
 	"github.com/pion/webrtc/v4"
@@ -31,18 +32,19 @@ func TestMain(m *testing.M) {
 
 func TestDC(t *testing.T) {
 	eg := webrtc.SettingEngine{}
-	c := try.To1(net.ListenUDP("udp", &net.UDPAddr{Port: 7799}))
-	defer c.Close()
-	udp := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: c})
+	if true {
+		c := try.To1(net.ListenUDP("udp", &net.UDPAddr{Port: 7799}))
+		defer c.Close()
+		udp := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: c})
+		eg.SetICEUDPMux(udp)
+	}
 	// udp := try.To1(ice.NewMultiUDPMuxFromPort(7799))
 	// defer udp.Close()
-	eg.SetICEUDPMux(udp)
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(eg))
 	for _, index := range []int{1, 2} {
 		log.Println("index", index)
 		ttt(api)
 	}
-	<-make(chan any)
 }
 
 func ttt(api *webrtc.API) {
@@ -64,7 +66,19 @@ func ttt(api *webrtc.API) {
 	offer = *pc.LocalDescription()
 	offerCh <- offer
 	answer := <-answerCh
-	log.Println("answer", answer.SDP)
+	// log.Println("answer", answer.SDP)
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				log.Println("dc state", dc.ReadyState())
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	try.To(pc.SetRemoteDescription(answer))
 
 	<-ctx.Done()
