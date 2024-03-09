@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,13 +42,20 @@ func TestDC(t *testing.T) {
 	// udp := try.To1(ice.NewMultiUDPMuxFromPort(7799))
 	// defer udp.Close()
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(eg))
+	var wg sync.WaitGroup
 	for _, index := range []int{1, 2} {
-		log.Println("index", index)
-		ttt(api)
+		wg.Add(1)
+		// func() {
+		go func() {
+			defer wg.Done()
+			log.Println("index", index)
+			ttt(api, index)
+		}()
 	}
+	wg.Wait()
 }
 
-func ttt(api *webrtc.API) {
+func ttt(api *webrtc.API, index int) {
 	wcfg := webrtc.Configuration{}
 	pc := try.To1(api.NewPeerConnection(wcfg))
 	dc := try.To1(pc.CreateDataChannel("xhe", nil))
@@ -62,18 +70,23 @@ func ttt(api *webrtc.API) {
 		cancel()
 	})
 	offer := try.To1(pc.CreateOffer(nil))
+	// gatherComplete := webrtc.GatheringCompletePromise(pc)
 	try.To(pc.SetLocalDescription(offer))
+	offer = *pc.LocalDescription()
+	log.Println("offer1", index, offer.SDP)
+	// <-gatherComplete
 	offer = *pc.LocalDescription()
 	offerCh <- offer
 	answer := <-answerCh
-	// log.Println("answer", answer.SDP)
+	log.Println("offer", index, offer.SDP)
+	log.Println("answer", index, answer.SDP)
 	go func() {
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				log.Println("dc state", dc.ReadyState())
+				log.Println("dc state", index, dc.ReadyState())
 			case <-ctx.Done():
 				return
 			}
@@ -82,6 +95,7 @@ func ttt(api *webrtc.API) {
 	try.To(pc.SetRemoteDescription(answer))
 
 	<-ctx.Done()
+	// <-make(chan any)
 }
 
 func handle(api *webrtc.API, sdp webrtc.SessionDescription) {
