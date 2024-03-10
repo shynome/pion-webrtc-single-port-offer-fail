@@ -1,9 +1,13 @@
 package main
 
 import (
-	"context"
+	"bytes"
+	"fmt"
+	"io"
 	"log"
 	"net"
+	"os"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -31,63 +35,41 @@ func TestMain(m *testing.M) {
 }
 
 func TestDC(t *testing.T) {
-	eg := webrtc.SettingEngine{}
-	conn := try.To1(net.ListenUDP("udp", &net.UDPAddr{Port: 7799}))
-	defer conn.Close()
-	udp := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
-	eg.SetICEUDPMux(udp)
-	api := webrtc.NewAPI(webrtc.WithSettingEngine(eg))
+
 	var wg sync.WaitGroup
 	for _, index := range []int{1, 2, 3} {
 		wg.Add(1)
 		func() {
 			defer wg.Done()
-			log.Println("index", index)
-			ttt(api, index)
+			cmd := exec.Command("go", "run", ".", fmt.Sprintf("%d", index))
+			stdin, stdinWriter := io.Pipe()
+			cmd.Stdin = stdin
+			stdout := new(bytes.Buffer)
+			cmd.Stdout = stdout
+			cmd.Stderr = os.Stderr
+			try.To(cmd.Start())
+			log.Println("offer read")
+			time.Sleep(3 * time.Second)
+			offerRaw := stdout.String()
+			log.Println("offer readed")
+			offer := webrtc.SessionDescription{
+				Type: webrtc.SDPTypeOffer,
+				SDP:  string(offerRaw),
+			}
+			offerCh <- offer
+			answer := <-answerCh
+			log.Println("answer write")
+			try.To1(io.WriteString(stdinWriter, answer.SDP))
+			try.To(stdin.Close())
+			log.Println("answer writed")
+			err := cmd.Wait()
+			if err != nil {
+				t.Error(err)
+			}
+			time.Sleep(30 * time.Second)
 		}()
 	}
 	wg.Wait()
-}
-
-func ttt(api *webrtc.API, index int) {
-	wcfg := webrtc.Configuration{}
-	pc := try.To1(api.NewPeerConnection(wcfg))
-	dc := try.To1(pc.CreateDataChannel("xhe", nil))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	dc.OnOpen(func() {
-		log.Println("opennnnn")
-		dc.SendText("hello")
-	})
-	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		log.Println("msg", string(msg.Data))
-		cancel()
-	})
-	offer := try.To1(pc.CreateOffer(nil))
-	try.To(pc.SetLocalDescription(offer))
-	offer = *pc.LocalDescription()
-	// log.Println("offer1", index, offer.SDP)
-	// <-webrtc.GatheringCompletePromise(pc)
-	offer = *pc.LocalDescription()
-	offerCh <- offer
-	answer := <-answerCh
-	// log.Println("offer", index, offer.SDP)
-	// log.Println("answer", index, answer.SDP)
-	go func() {
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				log.Println("dc state", index, dc.ReadyState())
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	try.To(pc.SetRemoteDescription(answer))
-
-	<-ctx.Done()
 }
 
 func handle(api *webrtc.API, sdp webrtc.SessionDescription) {
