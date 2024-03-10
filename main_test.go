@@ -18,9 +18,8 @@ var answerCh = make(chan webrtc.SessionDescription)
 
 func TestMain(m *testing.M) {
 	eg := webrtc.SettingEngine{}
-	c := try.To1(net.ListenUDP("udp", &net.UDPAddr{Port: 0}))
-	udp := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: c})
-	// udp := try.To1(ice.NewMultiUDPMuxFromPort(0))
+	conn := try.To1(net.ListenUDP("udp", &net.UDPAddr{Port: 0}))
+	udp := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
 	eg.SetICEUDPMux(udp)
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(eg))
 	go func() {
@@ -33,20 +32,15 @@ func TestMain(m *testing.M) {
 
 func TestDC(t *testing.T) {
 	eg := webrtc.SettingEngine{}
-	if true {
-		c := try.To1(net.ListenUDP("udp", &net.UDPAddr{Port: 7799}))
-		defer c.Close()
-		udp := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: c})
-		eg.SetICEUDPMux(udp)
-	}
-	// udp := try.To1(ice.NewMultiUDPMuxFromPort(7799))
-	// defer udp.Close()
+	conn := try.To1(net.ListenUDP("udp", &net.UDPAddr{Port: 7799}))
+	defer conn.Close()
+	udp := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
+	eg.SetICEUDPMux(udp)
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(eg))
 	var wg sync.WaitGroup
-	for _, index := range []int{1, 2} {
+	for _, index := range []int{1, 2, 3} {
 		wg.Add(1)
-		// func() {
-		go func() {
+		func() {
 			defer wg.Done()
 			log.Println("index", index)
 			ttt(api, index)
@@ -70,16 +64,15 @@ func ttt(api *webrtc.API, index int) {
 		cancel()
 	})
 	offer := try.To1(pc.CreateOffer(nil))
-	// gatherComplete := webrtc.GatheringCompletePromise(pc)
 	try.To(pc.SetLocalDescription(offer))
 	offer = *pc.LocalDescription()
-	log.Println("offer1", index, offer.SDP)
-	// <-gatherComplete
+	// log.Println("offer1", index, offer.SDP)
+	// <-webrtc.GatheringCompletePromise(pc)
 	offer = *pc.LocalDescription()
 	offerCh <- offer
 	answer := <-answerCh
-	log.Println("offer", index, offer.SDP)
-	log.Println("answer", index, answer.SDP)
+	// log.Println("offer", index, offer.SDP)
+	// log.Println("answer", index, answer.SDP)
 	go func() {
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
@@ -95,7 +88,6 @@ func ttt(api *webrtc.API, index int) {
 	try.To(pc.SetRemoteDescription(answer))
 
 	<-ctx.Done()
-	// <-make(chan any)
 }
 
 func handle(api *webrtc.API, sdp webrtc.SessionDescription) {
