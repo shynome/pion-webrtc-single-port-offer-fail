@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -81,5 +82,11 @@ func handle(api *webrtc.API, sdp webrtc.SessionDescription) {
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			dc.SendText("world")
 		})
+		dc.OnClose(func() {
+			log.Println("dc closed")
+		})
+	})
+	pc.OnConnectionStateChange(func(pcs webrtc.PeerConnectionState) {
+		log.Println("pc state", pcs.String())
 	})
 }
