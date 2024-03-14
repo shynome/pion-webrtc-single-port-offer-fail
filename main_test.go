@@ -1,16 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/pion/ice/v3"
 	"github.com/pion/webrtc/v4"
@@ -36,37 +34,34 @@ func TestMain(m *testing.M) {
 
 func TestDC(t *testing.T) {
 
+	l := try.To1(net.Listen("tcp", "127.0.0.1:0"))
+	defer l.Close()
+	go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		offerRaw := try.To1(io.ReadAll(r.Body))
+		offer := webrtc.SessionDescription{
+			Type: webrtc.SDPTypeOffer,
+			SDP:  string(offerRaw),
+		}
+		offerCh <- offer
+		answer := <-answerCh
+		try.To1(io.WriteString(w, answer.SDP))
+	}))
+
+	addr := l.Addr().String()
+
 	var wg sync.WaitGroup
 	for _, index := range []int{1, 2, 3} {
 		wg.Add(1)
 		func() {
 			defer wg.Done()
-			cmd := exec.Command("go", "run", ".", fmt.Sprintf("%d", index))
-			stdin, stdinWriter := io.Pipe()
-			cmd.Stdin = stdin
-			stdout := new(bytes.Buffer)
-			cmd.Stdout = stdout
+			cmd := exec.Command("go", "run", ".", fmt.Sprintf("%d", index), addr)
 			cmd.Stderr = os.Stderr
-			try.To(cmd.Start())
-			log.Println("offer read")
-			time.Sleep(3 * time.Second)
-			offerRaw := stdout.String()
-			log.Println("offer readed")
-			offer := webrtc.SessionDescription{
-				Type: webrtc.SDPTypeOffer,
-				SDP:  string(offerRaw),
-			}
-			offerCh <- offer
-			answer := <-answerCh
-			log.Println("answer write")
-			try.To1(io.WriteString(stdinWriter, answer.SDP))
-			try.To(stdin.Close())
-			log.Println("answer writed")
+			cmd.Start()
 			err := cmd.Wait()
 			if err != nil {
 				t.Error(err)
 			}
-			time.Sleep(30 * time.Second)
+			// time.Sleep(30 * time.Second)
 		}()
 	}
 	wg.Wait()

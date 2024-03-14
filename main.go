@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pion/ice/v3"
@@ -25,7 +28,7 @@ func main() {
 
 	wcfg := webrtc.Configuration{}
 	pc := try.To1(api.NewPeerConnection(wcfg))
-	// defer pc.Close()
+	defer pc.Close()
 	dc := try.To1(pc.CreateDataChannel("xhe", nil))
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
@@ -44,13 +47,11 @@ func main() {
 	// log.Println("offer1", index, offer.SDP)
 	// <-webrtc.GatheringCompletePromise(pc)
 	offer = *pc.LocalDescription()
-	log.Println("offer write")
-	try.To1(io.WriteString(os.Stdout, offer.SDP))
-	log.Println("offer writed")
-	//
-	log.Println("answer read")
-	answerRaw := try.To1(io.ReadAll(os.Stdin))
-	log.Println("answer readed")
+
+	endpoint := fmt.Sprintf("http://%s", os.Args[2])
+	resp := try.To1(http.Post(endpoint, "text/plain", strings.NewReader(offer.SDP)))
+	defer resp.Body.Close()
+	answerRaw := try.To1(io.ReadAll(resp.Body))
 	answer := webrtc.SessionDescription{
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  string(answerRaw),
